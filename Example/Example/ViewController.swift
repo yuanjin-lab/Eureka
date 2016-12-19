@@ -78,7 +78,12 @@ class HomeViewController : FormViewController {
                     row.title = row.tag
                     row.presentationMode = .segueName(segueName: "DisabledRowsControllerSegue", onDismiss: nil)
                 }
-            
+			
+				<<< ButtonRow("Moveable rows") { (row: ButtonRow) -> Void in
+					row.title = row.tag
+					row.presentationMode = .segueName(segueName: "MoveableRowsControllerSegue", onDismiss: nil)
+				}
+				
                 <<< ButtonRow("Formatters") { (row: ButtonRow) -> Void in
                     row.title = row.tag
                     row.presentationMode = .segueName(segueName: "FormattersControllerSegue", onDismiss: nil)
@@ -882,13 +887,65 @@ class DisabledRowsExample : FormViewController {
     }
 }
 
+//MARK: MoveableRowsExample
+
+class MoveableRowsExample : FormViewController {
+	
+	override func viewDidLoad() {
+		super.viewDidLoad()
+		
+		self.navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .edit, target: self, action: #selector(toggleEditing))
+		
+		form = Section()
+			
+			<<< TextRow(){
+				$0.title = "1. Tap & Hold to move..."
+				$0.moveable = true
+			}
+			
+			<<< SwitchRow(){
+				$0.title = "2. Tap & Hold to move..."
+				$0.moveable = true
+			}
+			
+			<<< TextRow(){
+				$0.title = "3. Tap & Hold to move..."
+				$0.moveable = true
+			}
+			
+			<<< CheckRow() {
+				$0.title = "4. Tap & Hold to move..."
+				$0.value = true
+				$0.moveable = true
+			}
+			
+			+++ Section()
+			
+			<<< TextRow() {
+				$0.title = "5. Tap & Hold to move..."
+				$0.moveable = true
+			}
+			
+			<<< TextRow() {
+				$0.title = "6. Tap & Hold to move..."
+				$0.moveable = true
+		}
+	}
+	
+	func toggleEditing(){
+		let isEditing = self.tableView?.isEditing ?? true
+		self.tableView?.setEditing(!isEditing, animated: true)
+		self.navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: (isEditing ? .edit : .done), target: self, action: #selector(toggleEditing))
+	}
+}
+
 //MARK: FormatterExample
 
 class FormatterExample : FormViewController {
-    
+	
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+		
         form +++ Section("Number formatters")
             <<< DecimalRow(){
                 $0.useFormatterDuringInput = true

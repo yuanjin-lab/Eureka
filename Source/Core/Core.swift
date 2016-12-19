@@ -247,11 +247,11 @@ public protocol FormatterProtocol {
 //MARK: Predicate Machine
 
 enum ConditionType {
-    case hidden, disabled
+    case hidden, disabled, moveable
 }
 
 /**
- Enumeration that are used to specify the disbaled and hidden conditions of rows
+ Enumeration that are used to specify the disbaled, hidden or moveable conditions of rows
  
  - Function:  A function that calculates the result
  - Predicate: A predicate that returns the result
@@ -480,6 +480,7 @@ open class FormViewController : UIViewController, FormViewControllerProtocol {
             tableView?.dataSource = self
         }
         tableView?.estimatedRowHeight = BaseRow.estimatedRowHeight
+		tableView?.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(longPressGestureHandler(_:))))
     }
     
     open override func viewWillAppear(_ animated: Bool) {
@@ -676,10 +677,96 @@ open class FormViewController : UIViewController, FormViewControllerProtocol {
     //MARK: Private
     
     var oldBottomInset : CGFloat?
+	
+	//MARK: UILongPressGestureRecognizer
+	
+	var snapshotView: UIView?
+	
+	func longPressGestureHandler(_ recognizer: UILongPressGestureRecognizer){
+		guard let tableView = self.tableView else{ return }
+		let location = recognizer.location(in: tableView)
+		
+		switch(recognizer.state){
+		case .began:
+			guard let indexPath = tableView.indexPathForRow(at: location) else{ return }
+			let row = form[indexPath]
+			tableView.deselectRow(at: indexPath, animated: false)
+			row.moving = true
+			
+			guard let cell = row.baseCell else{ return }
+			UIGraphicsBeginImageContextWithOptions(cell.bounds.size,false,0)
+			
+			guard let context = UIGraphicsGetCurrentContext() else{ return }
+			cell.layer.render(in: context)
+				
+			let image = UIGraphicsGetImageFromCurrentImageContext()
+			UIGraphicsEndImageContext()
+			
+			let snapshotView = UIImageView(image: image)
+			snapshotView.layer.masksToBounds	= false
+			snapshotView.layer.cornerRadius		= 0.0
+			snapshotView.layer.shadowOffset		= CGSize(width: -5.0,height: 0.0)
+			snapshotView.layer.shadowRadius		= 5.0
+			snapshotView.layer.shadowOpacity	= 0.4
+			snapshotView.alpha = 0.0
+			
+			snapshotView.center = cell.center
+			tableView.addSubview(snapshotView)
+			self.snapshotView = snapshotView
+			
+			UIView.animate(withDuration: 0.25, animations:{ () -> Void in
+				self.snapshotView?.center.y = location.y
+				self.snapshotView?.transform = CGAffineTransform(scaleX: 1.05,y: 1.05)
+				self.snapshotView?.alpha = 0.98
+				
+				cell.alpha = 0.0
+				
+			}, completion: nil)
+			
+		case .changed:
+			guard let snapshotView = self.snapshotView else{ return }
+			snapshotView.center.y = location.y
+			
+			guard let row = form.allRows.first(where: { $0.moving }), let cell = row.baseCell else{ return }
+			cell.isHidden = true
+			
+			guard let sourceIndexPath = row.indexPath, let indexPath = tableView.indexPathForRow(at: location) else{ return }
+			let destinationIndexPath = tableView.delegate?.tableView?(tableView, targetIndexPathForMoveFromRowAt: sourceIndexPath, toProposedIndexPath: indexPath) ?? indexPath
+			
+			guard sourceIndexPath != destinationIndexPath else{ return }
+			tableView.dataSource?.tableView?(tableView, moveRowAt: sourceIndexPath, to: destinationIndexPath)
+		
+		case .ended:
+			guard let row = form.allRows.first(where: { $0.moving }), let cell = row.baseCell else{ return }
+			row.moving = false
+			
+			cell.isHidden = false
+			cell.alpha = 0.0
+			
+			UIView.animate(withDuration: 0.25,animations:{ () -> Void in
+				self.snapshotView?.center = cell.center
+				self.snapshotView?.transform = CGAffineTransform.identity
+				self.snapshotView?.alpha = 0.0
+				
+				cell.alpha = 1.0
+				
+			},completion:{ (finished:Bool) -> Void in
+				self.snapshotView?.removeFromSuperview()
+				self.snapshotView = nil
+				
+				row.section?.reload(with: .none)
+			})
+        default:
+            // While this should never occur, note that entering an exception state isn't a bad idea
+            print("Warning! Cell entered unexpected state!")
+            break
+		}
+	}
 }
 
+
 extension FormViewController : UITableViewDelegate {
-    
+	
     //MARK: UITableViewDelegate
     
     open func tableView(_ tableView: UITableView, willSelectRowAt indexPath: IndexPath) -> IndexPath? {
@@ -741,6 +828,45 @@ extension FormViewController : UITableViewDelegate {
         }
         return view.bounds.height
     }
+	
+	open func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
+		return form[indexPath].isMoveable
+	}
+	
+	open func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
+		return form[indexPath].isMoveable
+	}
+	
+	open func tableView(_ tableView: UITableView, targetIndexPathForMoveFromRowAt sourceIndexPath: IndexPath, toProposedIndexPath proposedDestinationIndexPath: IndexPath) -> IndexPath {
+		guard sourceIndexPath.section == proposedDestinationIndexPath.section else{
+			if sourceIndexPath.section > proposedDestinationIndexPath.section{
+				return IndexPath(row: 0, section: sourceIndexPath.section)
+			}
+			return IndexPath(row: tableView.numberOfRows(inSection: sourceIndexPath.section) - 1, section: sourceIndexPath.section)
+		}
+
+		if form[proposedDestinationIndexPath].isMoveable{
+			return proposedDestinationIndexPath
+		}
+		let numberOfRowsInDestination = tableView.numberOfRows(inSection: proposedDestinationIndexPath.section)
+		
+		if sourceIndexPath.row < proposedDestinationIndexPath.row && (proposedDestinationIndexPath.row + 2) < numberOfRowsInDestination {
+			return tableView.delegate?.tableView?(tableView, targetIndexPathForMoveFromRowAt: sourceIndexPath, toProposedIndexPath: IndexPath(row: proposedDestinationIndexPath.row + 2, section: proposedDestinationIndexPath.section)) ?? sourceIndexPath
+			
+		} else if sourceIndexPath.row > proposedDestinationIndexPath.row && (proposedDestinationIndexPath.row - 2) >= 0 {
+			return tableView.delegate?.tableView?(tableView, targetIndexPathForMoveFromRowAt: sourceIndexPath, toProposedIndexPath: IndexPath(row: proposedDestinationIndexPath.row - 2, section: proposedDestinationIndexPath.section)) ?? sourceIndexPath
+		}
+		
+		return sourceIndexPath
+	}
+	
+	open func tableView(_ tableView: UITableView, editingStyleForRowAt indexPath: IndexPath) -> UITableViewCellEditingStyle {
+		return .none
+	}
+	
+	open func tableView(_ tableView: UITableView, shouldIndentWhileEditingRowAt indexPath: IndexPath) -> Bool {
+		return false
+	}
 }
 
 extension FormViewController : UITableViewDataSource {
@@ -767,11 +893,15 @@ extension FormViewController : UITableViewDataSource {
     open func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         return form[section].footer?.title
     }
+	
+	open func tableView(_ tableView: UITableView, moveRowAt sourceIndexPath: IndexPath, to destinationIndexPath: IndexPath) {
+		form[destinationIndexPath.section].insert(form[sourceIndexPath.section].remove(at: sourceIndexPath.row), at: destinationIndexPath.row)
+		form[destinationIndexPath.section].reload(with: .none)
+	}
 }
 
 extension FormViewController: FormDelegate {
-    
-    
+
     //MARK: FormDelegate
     
     open func sectionsHaveBeenAdded(_ sections: [Section], at indexes: IndexSet){
